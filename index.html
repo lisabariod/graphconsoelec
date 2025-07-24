@@ -1,127 +1,729 @@
-function fetchDataAndUpdateSheet() {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet();
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Heures Creuses Enedis</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
-  // Récupérer les onglets
-  var realisedSheet = sheet.getSheetByName("REALISED");
-  var d1Sheet = sheet.getSheetByName("D_1");
-  var d2Sheet = sheet.getSheetByName("D_2");
+        body {
+            font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            position: relative;
+            overflow-x: hidden;
+        }
 
-  // Fonction pour obtenir la dernière date_end d'un onglet
-  function getLastEndDate(sheet) {
-    var lastRow = sheet.getLastRow();
-    if (lastRow <= 1) return "2025-05-01T00:00:00+01:00"; // Date par défaut si la feuille est vide
-    return sheet.getRange(lastRow, 6).getValue(); // Supposons que la date_end est dans la colonne C
-  }
+        /* Animated background elements */
+        body::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.1) 1px, transparent 1px);
+            background-size: 50px 50px;
+            animation: float 20s infinite linear;
+            z-index: 0;
+        }
 
-  // Récupérer les dernières dates_end pour chaque onglet
-  var realisedLastEndDate = getLastEndDate(realisedSheet);
-  var d1LastEndDate = getLastEndDate(d1Sheet);
-  var d2LastEndDate = getLastEndDate(d2Sheet);
+        @keyframes float {
+            0% { transform: translate(0, 0) rotate(0deg); }
+            100% { transform: translate(-50px, -50px) rotate(360deg); }
+        }
 
-  // Fonction pour effectuer la requête et mettre à jour la feuille
-function fetchAndUpdate(sheet, startDate, type) {
-  var endDate = Utilities.formatDate(new Date(), "GMT+1", "yyyy-MM-dd'T'HH:mm:ssXXX");
-  var url = "https://digital.iservices.rte-france.com/open_api/consumption/v1/short_term";
-  var token = fetchAccessToken(); // Remplacez par votre token d'accès
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(15px);
+            border-radius: 24px;
+            padding: 40px;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
+            max-width: 800px;
+            width: 100%;
+            transition: transform 0.3s ease;
+            position: relative;
+            z-index: 1;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
 
-  var headers = {
-    "Authorization": "Bearer " + token
-  };
+        .container:hover {
+            transform: translateY(-8px);
+        }
 
-  var params = {
-    "start_date": startDate,
-    "end_date": endDate,
-    "type": type,
-  };
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
 
-  var options = {
-    "method": "get",
-    "headers": headers,
-    "muteHttpExceptions": true
-  };
+        h1 {
+            color: #333;
+            font-size: 2.5em;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+        }
 
-  var response = UrlFetchApp.fetch(buildUrlWithParams(url, params), options);
-  var data = JSON.parse(response.getContentText());
+        .subtitle {
+            color: #666;
+            font-size: 1.1em;
+            font-weight: 400;
+            opacity: 0.8;
+        }
 
-  if (response.getResponseCode() == 200) {
-    var allRows = []; // Tableau pour stocker toutes les lignes
+        .search-container {
+            position: relative;
+            margin-bottom: 30px;
+        }
 
-    var results = data.short_term;
-    for (var i = 0; i < results.length; i++) {
-      var type = results[i].type;
-      var start_date = results[i].start_date;
-      var end_date = results[i].end_date;
-      var values = results[i].values;
+        .search-wrapper {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
 
-      // Ajouter une ligne par valeur au tableau
-      for (var j = 0; j < values.length; j++) {
-        allRows.push([type, start_date, end_date, values[j].updated_date, values[j].start_date, values[j].end_date, values[j].value]);
-      }
-    }
+        #search {
+            flex: 1;
+            min-width: 280px;
+            padding: 18px 24px;
+            border: 2px solid #e0e0e0;
+            border-radius: 60px;
+            font-size: 16px;
+            outline: none;
+            transition: all 0.3s ease;
+            background: rgba(255, 255, 255, 0.9);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+        }
 
-    // Écrire toutes les lignes en une seule fois
-    if (allRows.length > 0) {
-      sheet.getRange(sheet.getLastRow() + 1, 1, allRows.length, allRows[0].length).setValues(allRows);
-    }
-  } else {
-    Logger.log("Erreur lors de la requête: " + response.getResponseCode());
-    Logger.log("Raison: " + response.getContentText());
-  }
-}
+        #search:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1), 0 4px 20px rgba(0, 0, 0, 0.1);
+            transform: translateY(-2px);
+        }
 
-function buildUrlWithParams(url, params) {
-  var paramString = Object.keys(params).map(function(key) {
-    return encodeURIComponent(key) + "=" + encodeURIComponent(params[key]);
-  }).join("&");
-  return url + "?" + paramString;
-}
+        #search::placeholder {
+            color: #aaa;
+            font-style: italic;
+        }
 
+        .search-btn {
+            padding: 18px 35px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            border-radius: 60px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
 
-  // Fonction pour construire l'URL avec les paramètres
-  function buildUrlWithParams(url, params) {
-    var paramString = Object.keys(params).map(function(key) {
-      return encodeURIComponent(key) + "=" + encodeURIComponent(params[key]);
-    }).join("&");
-    return url + "?" + paramString;
-  }
+        .search-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
 
-  // Mettre à jour chaque onglet
-  fetchAndUpdate(realisedSheet, realisedLastEndDate, 'REALISED');
-  fetchAndUpdate(d1Sheet, d1LastEndDate, 'D-1');
-  fetchAndUpdate(d2Sheet, d2LastEndDate, 'D-2');
-}
+        .search-btn:active {
+            transform: translateY(-1px);
+        }
 
-function fetchAccessToken() {
-  var url = "https://digital.iservices.rte-france.com/token/oauth/";
+        .search-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s;
+        }
 
-  var headers = {
-    "Content-Type": "application/x-www-form-urlencoded",
-    "Authorization": "Basic OTMzMjQ5MDQtNDVmMC00MWY5LTk4ZjUtNzJjNzFhZmUxMWY3OmIzZmZmMzkyLWQwMmQtNGZiMS05M2ZlLWM3NDhjOWY2YzJiZA=="
-  };
+        .search-btn:hover::before {
+            left: 100%;
+        }
 
-  var options = {
-    "method": "post",
-    "headers": headers,
-    "muteHttpExceptions": true
-  };
+        .status {
+            text-align: center;
+            margin-bottom: 25px;
+            padding: 15px 20px;
+            border-radius: 15px;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
 
-  try {
-    var response = UrlFetchApp.fetch(url, options);
-    var responseCode = response.getResponseCode();
-    var responseBody = response.getContentText();
+        .status.loading {
+            background: linear-gradient(135deg, rgba(255, 193, 7, 0.1), rgba(255, 152, 0, 0.1));
+            color: #f57c00;
+            border: 1px solid rgba(255, 193, 7, 0.3);
+        }
 
-    if (responseCode === 200) {
-      var creds = JSON.parse(responseBody);
-      Logger.log(creds);
-      return creds.access_token; // Retourne le token d'accès
-    } else {
-      Logger.log("Erreur lors de la requête: " + responseCode);
-      Logger.log("Raison: " + responseBody);
-      return null;
-    }
-  } catch (e) {
-    Logger.log("Exception: " + e.toString());
-    return null;
-  }
-}
+        .status.ready {
+            background: linear-gradient(135deg, rgba(76, 175, 80, 0.1), rgba(139, 195, 74, 0.1));
+            color: #2e7d32;
+            border: 1px solid rgba(76, 175, 80, 0.3);
+        }
 
+        .status.error {
+            background: linear-gradient(135deg, rgba(244, 67, 54, 0.1), rgba(229, 57, 53, 0.1));
+            color: #c62828;
+            border: 1px solid rgba(244, 67, 54, 0.3);
+        }
+
+        #result {
+            min-height: 80px;
+            padding: 25px;
+            background: rgba(255, 255, 255, 0.7);
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        #result p {
+            color: #666;
+            font-style: italic;
+            text-align: center;
+            padding: 30px;
+            font-size: 16px;
+        }
+
+        .result-item {
+            margin-bottom: 30px;
+            padding: 25px;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.08), rgba(118, 75, 162, 0.05));
+            border-radius: 20px;
+            border-left: 5px solid #667eea;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+        }
+
+        .result-item:hover {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.12), rgba(118, 75, 162, 0.08));
+            transform: translateX(8px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+        }
+
+        .city-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .city-name {
+            color: #333;
+            font-size: 20px;
+            font-weight: 700;
+            flex-grow: 1;
+        }
+
+        .postal-code {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .time-slots {
+            display: grid;
+            gap: 12px;
+        }
+
+        .time-slot {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 16px 20px;
+            border-radius: 15px;
+            border-left: 4px solid #667eea;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .time-slot:hover {
+            background: rgba(255, 255, 255, 1);
+            transform: translateX(5px);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .slot-number {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border-radius: 50%;
+            font-weight: 700;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .slot-time {
+            font-weight: 600;
+            color: #333;
+            font-size: 16px;
+            font-family: 'Monaco', 'Consolas', monospace;
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 30px;
+            color: #999;
+            font-style: italic;
+            background: linear-gradient(135deg, rgba(158, 158, 158, 0.1), rgba(189, 189, 189, 0.05));
+            border-radius: 15px;
+            border: 2px dashed #ddd;
+        }
+
+        .suggestions {
+            margin-top: 25px;
+            padding: 20px;
+            background: linear-gradient(135deg, rgba(33, 150, 243, 0.08), rgba(30, 136, 229, 0.05));
+            border-radius: 15px;
+            border-left: 4px solid #2196F3;
+        }
+
+        .suggestions h4 {
+            color: #1976D2;
+            margin-bottom: 12px;
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .suggestion-item {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 8px 15px;
+            margin: 4px;
+            border-radius: 20px;
+            color: #555;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 1px solid rgba(33, 150, 243, 0.2);
+        }
+
+        .suggestion-item:hover {
+            background: #2196F3;
+            color: white;
+            transform: translateY(-2px);
+        }
+
+        .debug-info {
+            background: rgba(0, 0, 0, 0.05);
+            padding: 20px;
+            border-radius: 15px;
+            margin-top: 25px;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 12px;
+            max-height: 250px;
+            overflow-y: auto;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        .loader {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 30px 20px;
+            }
+            
+            .search-wrapper {
+                flex-direction: column;
+            }
+            
+            #search, .search-btn {
+                width: 100%;
+            }
+            
+            h1 {
+                font-size: 2em;
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .city-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.6s ease-out;
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .slide-in {
+            animation: slideIn 0.4s ease-out;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>
+                <span>⚡</span>
+                <span>Heures Creuses Enedis</span>
+                <span>🏠</span>
+            </h1>
+            <p class="subtitle">Trouvez facilement vos plages d'heures creuses</p>
+        </div>
+        
+        <div id="status" class="status loading">
+            <div class="loader"></div>
+            Chargement des données...
+        </div>
+        
+        <div class="search-container">
+            <div class="search-wrapper">
+                <input type="text" id="search" placeholder="🔍 Commune ou code postal (ex: Paris, 75001...)" />
+                <button class="search-btn" onclick="searchHeures()">
+                    <span>Rechercher</span>
+                </button>
+            </div>
+        </div>
+        
+        <div id="result"></div>
+        <div id="debug" class="debug-info" style="display: none;"></div>
+    </div>
+
+    <script>
+        let data = [];
+        let dataLoaded = false;
+        let rawData = [];
+
+        // Fonction pour parser le CSV de manière plus robuste
+        function parseCSV(csvText) {
+            const lines = csvText.trim().split('\n');
+            const result = [];
+            
+            // Détection du séparateur
+            const firstLine = lines[0];
+            const semicolonCount = (firstLine.match(/;/g) || []).length;
+            const commaCount = (firstLine.match(/,/g) || []).length;
+            const separator = semicolonCount > commaCount ? ';' : ',';
+            
+            console.log(`Séparateur détecté: "${separator}"`);
+            
+            // Parse headers
+            const headers = lines[0].split(separator).map(h => h.trim().replace(/"/g, ''));
+            console.log('Headers:', headers);
+            
+            // Parse data
+            for (let i = 1; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+                
+                const values = line.split(separator).map(v => v.trim().replace(/"/g, ''));
+                const row = {};
+                
+                headers.forEach((header, index) => {
+                    row[header] = values[index] || '';
+                });
+                
+                result.push(row);
+            }
+            
+            return { headers, data: result };
+        }
+
+        // Chargement des données
+        fetch("https://docs.google.com/spreadsheets/d/e/2PACX-1vSMnsitY5AEjCzMz2hPNgOzAJThdDqkMFG5bKVnlg2s7uC9D8FZQpldA4NtwAv5hT7GdiT6EnMENFz5/pub?output=csv")
+            .then(res => {
+                if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`);
+                }
+                return res.text();
+            })
+            .then(csvText => {
+                console.log("CSV reçu, taille:", csvText.length);
+                
+                const parsed = parseCSV(csvText);
+                rawData = parsed.data;
+                
+                console.log("Données parsées:", parsed.data.length, "lignes");
+                
+                // Traitement des données
+                data = parsed.data.map((row, index) => {
+                    let code_postal = '';
+                    let commune = '';
+                    let horaires = [];
+                    
+                    // Recherche du code postal
+                    for (let key in row) {
+                        const lowerKey = key.toLowerCase();
+                        if (lowerKey.includes('code') && lowerKey.includes('postal') ||
+                            lowerKey.includes('cp') || 
+                            lowerKey === 'code postal') {
+                            code_postal = row[key];
+                            break;
+                        }
+                    }
+                    
+                    // Recherche de la commune
+                    for (let key in row) {
+                        const lowerKey = key.toLowerCase();
+                        if (lowerKey.includes('commune') || 
+                            lowerKey.includes('ville') || 
+                            lowerKey.includes('nom') ||
+                            lowerKey === 'commune') {
+                            commune = row[key];
+                            break;
+                        }
+                    }
+                    
+                    // Recherche des plages horaires
+                    for (let key in row) {
+                        const lowerKey = key.toLowerCase();
+                        const value = row[key];
+                        
+                        if (value && value.trim() && 
+                            (lowerKey.includes('plage') || 
+                             lowerKey.includes('horaire') || 
+                             lowerKey.includes('heure') ||
+                             lowerKey.match(/^plage\s*\d/) ||
+                             value.match(/\d{1,2}:\d{2}.*\d{1,2}:\d{2}/))) {
+                            
+                            let plage = value.trim();
+                            plage = plage.replace(/^(plage\s*:?\s*)/i, '');
+                            
+                            if (plage && plage.length > 3 && !plage.toLowerCase().includes('plage horaire')) {
+                                horaires.push(plage);
+                            }
+                        }
+                    }
+                    
+                    return {
+                        code_postal: code_postal?.toString().trim() || '',
+                        commune: commune?.toString().toLowerCase().trim() || '',
+                        commune_display: commune?.toString().trim() || '',
+                        horaires: horaires,
+                        raw: row
+                    };
+                }).filter(entry => entry.code_postal || entry.commune);
+
+                dataLoaded = true;
+                document.getElementById("status").innerHTML = `✅ <strong>${data.length}</strong> communes chargées - Prêt à rechercher !`;
+                document.getElementById("status").className = "status ready";
+                
+                console.log(`${data.length} communes chargées avec succès`);
+                updateDebugInfo();
+            })
+            .catch(error => {
+                console.error('Erreur lors du chargement:', error);
+                document.getElementById("status").innerHTML = `❌ <strong>Erreur:</strong> ${error.message}`;
+                document.getElementById("status").className = "status error";
+                document.getElementById("debug").style.display = "block";
+                document.getElementById("debug").innerHTML = `Erreur: ${error.message}<br>Vérifiez que l'URL Google Sheets est accessible publiquement.`;
+            });
+
+        function updateDebugInfo() {
+            const debugDiv = document.getElementById("debug");
+            const sample = data.slice(0, 3);
+            debugDiv.innerHTML = `
+                <strong>🔧 Informations de debug:</strong><br><br>
+                📊 Total: ${data.length} communes<br>
+                📋 Colonnes: ${rawData.length > 0 ? Object.keys(rawData[0]).join(', ') : 'Aucune'}<br><br>
+                <strong>📝 Échantillon de données:</strong><br>
+                ${sample.map((item, i) => 
+                    `${i+1}. ${item.commune_display} (${item.code_postal}) - ${item.horaires.length} plages: ${item.horaires.join(', ')}`
+                ).join('<br>')}
+            `;
+        }
+
+        // Fonction de recherche améliorée
+        function searchHeures() {
+            const input = document.getElementById("search").value.trim().toLowerCase();
+            const result = document.getElementById("result");
+            
+            if (!dataLoaded) {
+                result.innerHTML = `
+                    <div class="no-data">
+                        <div class="loader"></div>
+                        <p>Les données ne sont pas encore chargées. Veuillez patienter...</p>
+                    </div>`;
+                return;
+            }
+            
+            if (!input) {
+                result.innerHTML = `
+                    <div class="no-data">
+                        <p>🔍 Veuillez entrer une commune ou un code postal pour commencer</p>
+                        <p style="font-size: 14px; margin-top: 10px;">Exemples: Paris, Lyon, 75001, 69000...</p>
+                    </div>`;
+                document.getElementById("debug").style.display = "block";
+                updateDebugInfo();
+                return;
+            }
+
+            console.log("Recherche pour:", input);
+            
+            const matches = data.filter(row => {
+                const matchCP = row.code_postal && row.code_postal.toString().includes(input);
+                const matchCommune = row.commune && row.commune.includes(input);
+                const matchCommuneExact = row.commune && row.commune === input;
+                
+                return matchCP || matchCommune || matchCommuneExact;
+            });
+
+            console.log("Résultats trouvés:", matches.length);
+
+            if (matches.length > 0) {
+                result.innerHTML = matches.map(match => {
+                    if (match.horaires.length === 0) {
+                        return `
+                            <div class="result-item slide-in">
+                                <div class="city-header">
+                                    <div class="city-name">🏘️ ${capitalize(match.commune_display)}</div>
+                                    <div class="postal-code">${match.code_postal}</div>
+                                </div>
+                                <div class="no-data">
+                                    <p>⚠️ Aucune plage horaire disponible pour cette commune</p>
+                                    <p style="font-size: 12px; margin-top: 8px;">Les données peuvent ne pas être disponibles pour toutes les communes</p>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    
+                    return `
+                        <div class="result-item slide-in">
+                            <div class="city-header">
+                                <div class="city-name">🏘️ ${capitalize(match.commune_display)}</div>
+                                <div class="postal-code">${match.code_postal}</div>
+                            </div>
+                            <div class="time-slots">
+                                ${match.horaires.map((horaire, index) => `
+                                    <div class="time-slot">
+                                        <div class="slot-number">${index + 1}</div>
+                                        <div class="slot-time">${horaire}</div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                }).join("");
+                
+                result.classList.add('fade-in');
+                setTimeout(() => result.classList.remove('fade-in'), 600);
+            } else {
+                // Recherche de suggestions
+                const suggestions = data.filter(row => 
+                    row.commune.includes(input.substring(0, 3)) || 
+                    row.code_postal.startsWith(input.substring(0, 2))
+                ).slice(0, 8);
+                
+                result.innerHTML = `
+                    <div class="no-data fade-in">
+                        <p>❌ Aucun résultat trouvé pour "<strong>${input}</strong>"</p>
+                        <p style="font-size: 14px; margin-top: 10px; color: #777;">
+                            Vérifiez l'orthographe ou essayez avec le code postal complet
+                        </p>
+                    </div>
+                    ${suggestions.length > 0 ? `
+                        <div class="suggestions fade-in">
+                            <h4>💡 Suggestions :</h4>
+                            <div>
+                                ${suggestions.map(s => 
+                                    `<span class="suggestion-item" onclick="selectSuggestion('${s.commune_display}', '${s.code_postal}')">${capitalize(s.commune_display)} (${s.code_postal})</span>`
+                                ).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+                `;
+            }
+            
+            // Debug si nécessaire
+            if (matches.length === 0) {
+                document.getElementById("debug").style.display = "block";
+                updateDebugInfo();
+            }
+        }
+
+        // Fonction pour sélectionner une suggestion
+        function selectSuggestion(commune, codePostal) {
+            document.getElementById("search").value = commune;
+            searchHeures();
+        }
+
+        // Fonction pour mettre en forme les noms
+        function capitalize(str) {
+            if (!str) return '';
+            return str
+                .toLowerCase()
+                .split(" ")
+                .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+                .join(" ");
+        }
+
+        // Recherche sur appui de la touche Entrée
+        document.getElementById("search").addEventListener("keypress", function(e) {
+            if (e.key === "Enter") {
+                searchHeures();
+            }
+        });
+
+        // Toggle debug info avec F12
+        document.addEventListener("keydown", function(e) {
+            if (e.key === "F12" || (e.ctrlKey && e.shiftKey && e.key === "I")) {
+                e.preventDefault();
+                const debug = document.getElementById("debug");
+                debug.style.display = debug.style.display === "none" ? "block" : "none";
+            }
+        });
+
+        // Auto-focus sur le champ de recherche
+        window.addEventListener('load', () => {
+            document.getElementById('search').focus();
+        });
+    </script>
+</body>
+</html>
