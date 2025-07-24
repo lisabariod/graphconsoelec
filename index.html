@@ -1,1 +1,127 @@
-<h2> fgjbljgb</h2>
+function fetchDataAndUpdateSheet() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Récupérer les onglets
+  var realisedSheet = sheet.getSheetByName("REALISED");
+  var d1Sheet = sheet.getSheetByName("D_1");
+  var d2Sheet = sheet.getSheetByName("D_2");
+
+  // Fonction pour obtenir la dernière date_end d'un onglet
+  function getLastEndDate(sheet) {
+    var lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return "2025-05-01T00:00:00+01:00"; // Date par défaut si la feuille est vide
+    return sheet.getRange(lastRow, 6).getValue(); // Supposons que la date_end est dans la colonne C
+  }
+
+  // Récupérer les dernières dates_end pour chaque onglet
+  var realisedLastEndDate = getLastEndDate(realisedSheet);
+  var d1LastEndDate = getLastEndDate(d1Sheet);
+  var d2LastEndDate = getLastEndDate(d2Sheet);
+
+  // Fonction pour effectuer la requête et mettre à jour la feuille
+function fetchAndUpdate(sheet, startDate, type) {
+  var endDate = Utilities.formatDate(new Date(), "GMT+1", "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var url = "https://digital.iservices.rte-france.com/open_api/consumption/v1/short_term";
+  var token = fetchAccessToken(); // Remplacez par votre token d'accès
+
+  var headers = {
+    "Authorization": "Bearer " + token
+  };
+
+  var params = {
+    "start_date": startDate,
+    "end_date": endDate,
+    "type": type,
+  };
+
+  var options = {
+    "method": "get",
+    "headers": headers,
+    "muteHttpExceptions": true
+  };
+
+  var response = UrlFetchApp.fetch(buildUrlWithParams(url, params), options);
+  var data = JSON.parse(response.getContentText());
+
+  if (response.getResponseCode() == 200) {
+    var allRows = []; // Tableau pour stocker toutes les lignes
+
+    var results = data.short_term;
+    for (var i = 0; i < results.length; i++) {
+      var type = results[i].type;
+      var start_date = results[i].start_date;
+      var end_date = results[i].end_date;
+      var values = results[i].values;
+
+      // Ajouter une ligne par valeur au tableau
+      for (var j = 0; j < values.length; j++) {
+        allRows.push([type, start_date, end_date, values[j].updated_date, values[j].start_date, values[j].end_date, values[j].value]);
+      }
+    }
+
+    // Écrire toutes les lignes en une seule fois
+    if (allRows.length > 0) {
+      sheet.getRange(sheet.getLastRow() + 1, 1, allRows.length, allRows[0].length).setValues(allRows);
+    }
+  } else {
+    Logger.log("Erreur lors de la requête: " + response.getResponseCode());
+    Logger.log("Raison: " + response.getContentText());
+  }
+}
+
+function buildUrlWithParams(url, params) {
+  var paramString = Object.keys(params).map(function(key) {
+    return encodeURIComponent(key) + "=" + encodeURIComponent(params[key]);
+  }).join("&");
+  return url + "?" + paramString;
+}
+
+
+  // Fonction pour construire l'URL avec les paramètres
+  function buildUrlWithParams(url, params) {
+    var paramString = Object.keys(params).map(function(key) {
+      return encodeURIComponent(key) + "=" + encodeURIComponent(params[key]);
+    }).join("&");
+    return url + "?" + paramString;
+  }
+
+  // Mettre à jour chaque onglet
+  fetchAndUpdate(realisedSheet, realisedLastEndDate, 'REALISED');
+  fetchAndUpdate(d1Sheet, d1LastEndDate, 'D-1');
+  fetchAndUpdate(d2Sheet, d2LastEndDate, 'D-2');
+}
+
+function fetchAccessToken() {
+  var url = "https://digital.iservices.rte-france.com/token/oauth/";
+
+  var headers = {
+    "Content-Type": "application/x-www-form-urlencoded",
+    "Authorization": "Basic OTMzMjQ5MDQtNDVmMC00MWY5LTk4ZjUtNzJjNzFhZmUxMWY3OmIzZmZmMzkyLWQwMmQtNGZiMS05M2ZlLWM3NDhjOWY2YzJiZA=="
+  };
+
+  var options = {
+    "method": "post",
+    "headers": headers,
+    "muteHttpExceptions": true
+  };
+
+  try {
+    var response = UrlFetchApp.fetch(url, options);
+    var responseCode = response.getResponseCode();
+    var responseBody = response.getContentText();
+
+    if (responseCode === 200) {
+      var creds = JSON.parse(responseBody);
+      Logger.log(creds);
+      return creds.access_token; // Retourne le token d'accès
+    } else {
+      Logger.log("Erreur lors de la requête: " + responseCode);
+      Logger.log("Raison: " + responseBody);
+      return null;
+    }
+  } catch (e) {
+    Logger.log("Exception: " + e.toString());
+    return null;
+  }
+}
+
